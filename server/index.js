@@ -23,10 +23,16 @@ if (missing.length) {
   console.warn(`Missing server environment variables: ${missing.join(', ')}`);
 }
 
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+const getSupabaseAdmin = () => {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
+  }
+  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+};
+
+app.get('/', (_req, res) => {
+  res.json({ ok: true, service: 'walkie-talkie-token-server', status: 'running' });
+});
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'walkie-talkie-token-server' });
@@ -47,6 +53,7 @@ app.post('/token', async (req, res) => {
       return res.status(400).json({ error: 'roomId is required' });
     }
 
+    const supabaseAdmin = getSupabaseAdmin();
     const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
     if (userError || !userData.user) {
       return res.status(401).json({ error: 'Invalid Supabase session' });
@@ -100,6 +107,12 @@ app.post('/token', async (req, res) => {
   }
 });
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Token server running on http://0.0.0.0:${port}`);
-});
+// Vercel imports this module as a serverless function. Do not call listen() there.
+// Local development still uses `npm start`.
+if (process.env.VERCEL !== '1') {
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`Token server running on http://0.0.0.0:${port}`);
+  });
+}
+
+export default app;
