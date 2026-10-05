@@ -2,7 +2,7 @@
 
 ## Fixed dependency tree
 - Expo SDK 54 retained consistently.
-- `@config-plugins/react-native-webrtc` updated from 12.x (Expo 53) to 13.0.0 (Expo 54).
+- `@config-plugins/react-native-webrtc` updated from 12.x (Expo 53) to 13.1.0 (Expo 54).
 - LiveKit React Native pinned to 2.12.0.
 - LiveKit WebRTC pinned to 144.1.2, matching LiveKit React Native 2.12.0.
 - `livekit-client` pinned to 2.20.1 instead of a floating range.

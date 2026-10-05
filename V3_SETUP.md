@@ -20,7 +20,7 @@ npm ls expo @config-plugins/react-native-webrtc @livekit/react-native @livekit/r
 
 Expected core versions:
 - Expo 54.x
-- config plugin 13.0.0
+- config plugin 13.1.0
 - LiveKit RN 2.12.0
 - LiveKit WebRTC 144.1.2
 - livekit-client 2.20.1

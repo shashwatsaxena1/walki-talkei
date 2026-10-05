@@ -2,7 +2,7 @@
   "expo": {
     "name": "Walkie Talkie",
     "slug": "walkie-talkie",
-    "version": "3.0.0",
+    "version": "3.1.0",
     "orientation": "portrait",
     "scheme": "walkietalkie",
     "userInterfaceStyle": "dark",
@@ -10,7 +10,14 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "@livekit/react-native-expo-plugin",
+      [
+        "@livekit/react-native-expo-plugin",
+        {
+          "android": {
+            "audioType": "communication"
+          }
+        }
+      ],
       "@config-plugins/react-native-webrtc",
       "./plugins/withForegroundService"
     ],
@@ -25,7 +32,7 @@
         "WAKE_LOCK",
         "FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
-      "versionCode": 30
+      "versionCode": 31
     }
   }
 }

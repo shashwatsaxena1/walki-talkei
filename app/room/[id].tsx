@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { Alert, PermissionsAndroid, Platform, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { AudioSession, RoomEvent } from '@livekit/react-native';
 import ReactNativeForegroundService from '@supersami/rn-foreground-service';
@@ -21,9 +21,36 @@ export default function RoomScreen() {
   useEffect(() => {
     let mounted = true;
 
+    async function ensureAndroidPermissions() {
+      if (Platform.OS !== 'android') return;
+      const microphone = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+        {
+          title: 'Microphone permission',
+          message: 'Walkie Talkie needs your microphone so you can talk in a room.',
+          buttonPositive: 'Allow',
+        }
+      );
+      if (microphone !== PermissionsAndroid.RESULTS.GRANTED) {
+        throw new Error('Microphone permission was not granted.');
+      }
+
+      if (Platform.Version >= 33 && PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS) {
+        await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+          {
+            title: 'Voice-room notification',
+            message: 'Allow notifications so Android can show the active voice-room service.',
+            buttonPositive: 'Allow',
+          }
+        );
+      }
+    }
+
     async function connect() {
       try {
         setError('');
+        await ensureAndroidPermissions();
         await AudioSession.startAudioSession();
         try {
           ReactNativeForegroundService.start({
@@ -31,7 +58,9 @@ export default function RoomScreen() {
             title: 'Walkie Talkie',
             message: 'Voice room is active',
           });
-        } catch {}
+        } catch (serviceError) {
+          console.warn('Foreground service could not start', serviceError);
+        }
 
         const tokenServer = process.env.EXPO_PUBLIC_TOKEN_SERVER_URL || 'http://10.0.2.2:3000';
         const { token, url } = await getLiveKitToken(String(id), tokenServer);
