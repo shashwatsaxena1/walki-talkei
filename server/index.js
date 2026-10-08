@@ -1,117 +1,202 @@
-import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { AccessToken } from 'livekit-server-sdk';
 import { createClient } from '@supabase/supabase-js';
+import { AccessToken } from 'livekit-server-sdk';
 
 const app = express();
-const port = Number(process.env.PORT || 3000);
+app.disable('x-powered-by');
+app.use(cors({ origin: true, methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] }));
+app.use(express.json({ limit: '64kb' }));
 
-app.use(cors());
-app.use(express.json({ limit: '32kb' }));
-
-const required = [
+const REQUIRED = [
   'LIVEKIT_API_KEY',
   'LIVEKIT_API_SECRET',
   'LIVEKIT_URL',
   'SUPABASE_URL',
-  'SUPABASE_SERVICE_ROLE_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY'
 ];
 
-const missing = required.filter((key) => !process.env[key]);
-if (missing.length) {
-  console.warn(`Missing server environment variables: ${missing.join(', ')}`);
+const missingEnv = () => REQUIRED.filter(key => !process.env[key]);
+let adminClient;
+
+function supabaseAdmin() {
+  if (!adminClient) {
+    adminClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+  }
+  return adminClient;
 }
 
-const getSupabaseAdmin = () => {
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
+function fail(res, status, error) {
+  return res.status(status).json({ ok: false, error });
+}
+
+function roomCode(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function validRoomCode(value) {
+  return /^[A-Z0-9]{6}$/.test(value);
+}
+
+function makeRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i += 1) {
+    code += chars[Math.floor(Math.random() * chars.length)];
   }
-  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-};
+  return code;
+}
+
+async function authenticatedUser(req) {
+  const header = req.get('authorization') || '';
+  if (!header.startsWith('Bearer ')) {
+    throw Object.assign(new Error('Missing Supabase access token'), { status: 401 });
+  }
+
+  const accessToken = header.slice(7).trim();
+  if (!accessToken) {
+    throw Object.assign(new Error('Missing Supabase access token'), { status: 401 });
+  }
+
+  const { data, error } = await supabaseAdmin().auth.getUser(accessToken);
+  if (error || !data?.user) {
+    throw Object.assign(new Error('Invalid Supabase access token'), { status: 401 });
+  }
+  return data.user;
+}
 
 app.get('/', (_req, res) => {
-  res.json({ ok: true, service: 'walkie-talkie-token-server', status: 'running' });
+  res.json({ ok: true, service: 'walkie-talkie-token-server', version: '4.0.1' });
 });
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'walkie-talkie-token-server' });
+  res.json({ ok: true, service: 'walkie-talkie-token-server', status: 'healthy' });
+});
+
+app.get('/ready', (_req, res) => {
+  const missing = missingEnv();
+  if (missing.length) return res.status(503).json({ ok: false, missing });
+  return res.json({ ok: true });
+});
+
+app.post('/rooms/create', async (req, res) => {
+  try {
+    const missing = missingEnv();
+    if (missing.length) return fail(res, 503, 'Server is not configured');
+
+    const user = await authenticatedUser(req);
+    const sb = supabaseAdmin();
+    let roomId = null;
+
+    for (let i = 0; i < 10; i += 1) {
+      const candidate = makeRoomCode();
+      const { data, error } = await sb.from('rooms').select('room_id').eq('room_id', candidate).maybeSingle();
+      if (error) return fail(res, 500, 'Room lookup failed');
+      if (!data) {
+        roomId = candidate;
+        break;
+      }
+    }
+
+    if (!roomId) return fail(res, 500, 'Could not allocate room code');
+
+    const { error: roomError } = await sb.from('rooms').insert({ room_id: roomId, owner_id: user.id });
+    if (roomError) return fail(res, 500, 'Could not create room');
+
+    const { error: memberError } = await sb.from('room_members').insert({ room_id: roomId, user_id: user.id });
+    if (memberError) {
+      await sb.from('rooms').delete().eq('room_id', roomId);
+      return fail(res, 500, 'Could not add room member');
+    }
+
+    return res.json({ ok: true, roomId });
+  } catch (error) {
+    console.error('rooms/create', error);
+    return fail(res, error.status || 500, error.status ? error.message : 'Could not create room');
+  }
+});
+
+app.post('/rooms/join', async (req, res) => {
+  try {
+    const missing = missingEnv();
+    if (missing.length) return fail(res, 503, 'Server is not configured');
+
+    const user = await authenticatedUser(req);
+    const roomId = roomCode(req.body?.roomId);
+    if (!validRoomCode(roomId)) return fail(res, 400, 'Room code must be 6 letters/numbers');
+
+    const sb = supabaseAdmin();
+    const { data: room, error: roomError } = await sb.from('rooms').select('room_id').eq('room_id', roomId).maybeSingle();
+    if (roomError) return fail(res, 500, 'Room lookup failed');
+    if (!room) return fail(res, 404, 'Room not found');
+
+    const { error } = await sb.from('room_members').upsert(
+      { room_id: roomId, user_id: user.id },
+      { onConflict: 'room_id,user_id' }
+    );
+    if (error) return fail(res, 500, 'Could not join room');
+
+    return res.json({ ok: true, roomId });
+  } catch (error) {
+    console.error('rooms/join', error);
+    return fail(res, error.status || 500, error.status ? error.message : 'Could not join room');
+  }
 });
 
 app.post('/token', async (req, res) => {
   try {
-    if (missing.length) {
-      return res.status(500).json({ error: 'Token server is not fully configured' });
-    }
+    const missing = missingEnv();
+    if (missing.length) return fail(res, 503, 'Server is not configured');
 
-    const auth = req.headers.authorization || '';
-    const jwt = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!jwt) return res.status(401).json({ error: 'Missing bearer token' });
+    const user = await authenticatedUser(req);
+    const roomId = roomCode(req.body?.roomId);
+    const name = String(req.body?.name || '').trim().slice(0, 60);
 
-    const { roomId } = req.body ?? {};
-    if (typeof roomId !== 'string' || !roomId.trim()) {
-      return res.status(400).json({ error: 'roomId is required' });
-    }
+    if (!validRoomCode(roomId)) return fail(res, 400, 'Room code must be 6 letters/numbers');
 
-    const supabaseAdmin = getSupabaseAdmin();
-    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(jwt);
-    if (userError || !userData.user) {
-      return res.status(401).json({ error: 'Invalid Supabase session' });
-    }
-
-    const user = userData.user;
-    const normalizedRoomId = roomId.trim();
-
-    const { data: membership, error: membershipError } = await supabaseAdmin
+    const sb = supabaseAdmin();
+    const { data: member, error: memberError } = await sb
       .from('room_members')
       .select('room_id')
-      .eq('room_id', normalizedRoomId)
+      .eq('room_id', roomId)
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (membershipError) throw membershipError;
-
-    if (!membership) {
-      return res.status(403).json({ error: 'You are not a member of this room' });
-    }
-
-    const roomName = `room_${normalizedRoomId}`;
-    const displayName =
-      user.user_metadata?.username || user.email?.split('@')[0] || user.id;
+    if (memberError) return fail(res, 500, 'Membership check failed');
+    if (!member) return fail(res, 403, 'You are not a member of this room');
 
     const token = new AccessToken(
       process.env.LIVEKIT_API_KEY,
       process.env.LIVEKIT_API_SECRET,
       {
         identity: user.id,
-        name: String(displayName),
-        ttl: '1h',
+        name: name || user.user_metadata?.display_name || user.email || user.id,
+        ttl: '1h'
       }
     );
 
     token.addGrant({
       roomJoin: true,
-      room: roomName,
+      room: roomId,
       canPublish: true,
       canSubscribe: true,
+      canPublishData: true
     });
 
-    res.json({
-      token: await token.toJwt(),
-      url: process.env.LIVEKIT_URL,
-      roomName,
-    });
+    const jwt = await token.toJwt();
+    return res.json({ ok: true, token: jwt, wsUrl: process.env.LIVEKIT_URL, roomId, expiresIn: 3600 });
   } catch (error) {
-    console.error('Token error:', error);
-    res.status(500).json({ error: 'Could not create token' });
+    console.error('/token', error);
+    return fail(res, error.status || 500, error.status ? error.message : 'Unable to create voice token');
   }
 });
 
-// Vercel imports this module as a serverless function. Do not call listen() there.
-// Local development still uses `npm start`.
 if (process.env.VERCEL !== '1') {
+  const port = Number(process.env.PORT || 3000);
   app.listen(port, '0.0.0.0', () => {
-    console.log(`Token server running on http://0.0.0.0:${port}`);
+    console.log(`Walkie Talkie token server listening on ${port}`);
   });
 }
 

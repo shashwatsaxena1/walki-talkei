@@ -1,11 +1,9 @@
-import { registerGlobals } from '@livekit/react-native';
 import ReactNativeForegroundService from '@supersami/rn-foreground-service';
-import 'react-native-url-polyfill/auto';
+import { registerRootComponent } from 'expo';
+import App from './src/App';
 
-// LiveKit's React Native SDK requires WebRTC globals before any room is created.
-registerGlobals();
+// LiveKit recommends a native foreground service for Android background voice.
+// Register it before Expo mounts the React tree.
+ReactNativeForegroundService.register();
 
-// Registers the Android foreground service used to keep an active voice room alive in background.
-try { ReactNativeForegroundService.register(); } catch {}
-
-import 'expo-router/entry';
+registerRootComponent(App);
