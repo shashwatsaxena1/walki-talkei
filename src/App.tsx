@@ -384,7 +384,7 @@ function RoomScreen({ route }: any) {
             title: 'Walkie Talkie is connected',
             message: `Voice room ${roomId} is active`,
             icon: 'ic_launcher',
-            setOnlyAlertOnce: true,
+            setOnlyAlertOnce: 'true',
             color: '#111111'
           });
           serviceStarted.current = true;

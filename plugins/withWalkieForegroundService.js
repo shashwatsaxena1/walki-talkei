@@ -29,6 +29,9 @@ module.exports = function withWalkieForegroundService(config) {
     const application = manifest.manifest.application?.[0];
     if (!application) return configMod;
 
+    application.$ = application.$ || {};
+    application.$['android:usesCleartextTraffic'] = 'true';
+
     ensurePermission(manifest, 'android.permission.FOREGROUND_SERVICE');
     ensurePermission(manifest, 'android.permission.FOREGROUND_SERVICE_MICROPHONE');
     ensurePermission(manifest, 'android.permission.POST_NOTIFICATIONS');

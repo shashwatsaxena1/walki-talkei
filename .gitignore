@@ -12,4 +12,6 @@ ios/
 *.mobileprovision
 .DS_Store
 npm-debug.log*
+expo-local.*.log
+server-local.*.log
 .yarn/
